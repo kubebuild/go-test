@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: go-test{{ .Values.suffix }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    component: go-test{{ .Values.suffix }}
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      component: go-test{{ .Values.suffix }}
+  template:
+    metadata:
+      labels:
+        component: go-test{{ .Values.suffix }}
+    spec:
+      containers:
+      - name: go-test
+        image: {{ .Values.image }}
+        imagePullPolicy: Always
+        ports:
+        - containerPort: {{ .Values.containerPort }}

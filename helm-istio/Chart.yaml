@@ -1,0 +1,7 @@
+name: go-test-istio
+version: 0.1
+description: Istio files for go-test.
+maintainers:
+  - name: Andrei Petrescu
+    email: andrei.petrescu@cloudhero.io
+appVersion: 1.0

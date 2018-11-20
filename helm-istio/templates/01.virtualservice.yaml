@@ -1,0 +1,17 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: go-test{{ .Values.suffix }}-vs
+  namespace: {{ .Values.namespace }}
+spec:
+  hosts:
+  - test{{ .Values.suffix }}.cloudhero.io
+  gateways:
+  - go-test{{ .Values.suffix }}-gateway
+  http:
+  - route:
+    - destination:
+        host: go-test{{ .Values.suffix }}.{{ .Values.namespace }}.svc.cluster.local
+        port:
+          number: 80
+      weight: 100

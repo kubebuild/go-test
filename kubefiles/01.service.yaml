@@ -1,0 +1,12 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: go-test
+  namespace: go-test
+spec:
+  selector:
+    component: go-test
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080

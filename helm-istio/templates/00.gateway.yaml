@@ -1,8 +1,8 @@
 apiVersion: networking.istio.io/v1alpha3
 kind: Gateway
 metadata:
-  name: go-test-gateway
-  namespace: go-test
+  name: go-test{{ .Values.suffix }}-gateway
+  namespace: {{ .Values.namespace }}
 spec:
   selector:
     istio: ingressgateway
@@ -12,4 +12,4 @@ spec:
       name: http
       protocol: HTTP
     hosts:
-    - test.cloudhero.io
+    - test{{ .Values.suffix }}.cloudhero.io

@@ -1,0 +1,198 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: go-test-pipeline-
+spec:
+  entrypoint: go-test-pipeline
+  arguments:
+    parameters:
+    - name: buildNumber
+      value: "0"
+    - name: branch
+      value: develop
+    - name: repo
+      value: https://github.com/cloud-hero/go-test.git
+    - name: revision
+      value: HEAD
+  volumeClaimTemplates:
+  - metadata:
+      name: go-test-pvc
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: "connex-nfs"
+      resources:
+        requests:
+          storage: 1Gi
+  templates:
+  - name: alpine-sh
+    inputs:
+      parameters:
+      - name: command
+    container:
+      image: alpine
+      command: ["sh","-c"]
+      args: ["{{inputs.parameters.command}}"]
+      volumeMounts:
+      - name: go-test-pvc
+        mountPath: /code
+  - name: git
+    inputs:
+      parameters:
+      - name: branch
+      - name: repo
+      - name: targetDir
+      - name: port
+    container:
+      image: alpine/git
+      args: ["clone","--depth=1","-b","$(BRANCH)","$(REVISION)","$(REPO)","/code$(TARGET_DIR)"]
+      volumeMounts:
+      - name: go-test-pvc
+        mountPath: /code
+      env:
+      - name: GIT_SSH_COMMAND
+        value: "ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -p {{inputs.parameters.port}}"
+      - name: BRANCH
+        value: "{{workflow.parameters.branch}}"
+      - name: REPO
+        value: "{{workflow.parameters.repo}}"
+      - name: REVISION
+        value: "{{workflow.parameters.revision}}"
+      - name: TARGET_DIR
+        value: "{{inputs.parameters.targetDir}}"
+  - name: ci-dind
+    container:
+      image: docker:stable
+      command: [sh, -c]
+      args: ["until docker ps; do sleep 3; done && 
+      docker build 
+      --build-arg http_proxy=$(HTTP_PROXY)
+      --build-arg https_proxy=$(HTTPS_PROXY) 
+      --build-arg no_proxy=$(NO_PROXY)
+      -t $(IMAGE):$(TAG) . && 
+      docker push $(IMAGE):$(TAG) && 
+      docker tag $(IMAGE):$(TAG) $(IMAGE):latest && 
+      docker push $(IMAGE):latest"]
+      workingDir: /code
+      volumeMounts:
+      - name: docker-volume
+        mountPath: "/root/.docker"
+        readOnly: true
+      - name: go-test-pvc
+        mountPath: /code
+      env:
+      - name: DOCKER_HOST
+        value: 127.0.0.1
+      - name: HTTP_PROXY
+        value: "{{inputs.parameters.http_proxy}}"
+      - name: HTTPS_PROXY
+        value: "{{inputs.parameters.https_proxy}}"
+      - name: NO_PROXY
+        value: "{{inputs.parameters.no_proxy}}"
+      - name: IMAGE
+        value: "{{inputs.parameters.image}}"
+      - name: TAG
+        value: "{{workflow.parameters.buildNumber}}"
+    sidecars:
+    - name: dind
+      image: docker:stable-dind
+      args: ["--insecure-registry=devops02.connex.ro:18443"]
+      env:
+      - name: HTTP_PROXY
+        value: {{inputs.parameters.http-proxy}}
+      - name: HTTPS_PROXY
+        value: {{inputs.parameters.http-proxy}}
+      - name: NO_PROXY
+        value: {{inputs.parameters.no_proxy}}
+      securityContext:
+        privileged: true
+      mirrorVolumeMounts: true
+  - name: helm-template
+    container: 
+      image: alpine/helm
+      command: ["helm"]
+      args: ["temlate","--set image=$(IMAGE):$(TAG)","$(ADDITIONAL_PARAMETERS)","$(HELM_FOLDER)",">","$(OUTPUT_NAME)"]
+      env:
+      - name: ADDITIONAL_PARAMETERS
+        value: {{inputs.parameters.additional-parameters}}
+      - name: IMAGE
+        value: {{inputs.parameters.image}}
+      - name: TAG
+        value: {{workflow.parameters.buildNumber}}
+      - name: HELM_FOLDER
+        value: {{inputs.parameters.helm-folder}}
+      - name: OUTPUT_NAME
+        value: {{inputs.parameters.output-name}}
+      volumeMounts:
+      - name: go-test-pvc
+        mountPath: /code
+  - name: kubectl
+    inputs:
+      parameters:
+      - name: kubefile
+    container:
+      image: cloudhero/kubectl:1.10.0
+      command: ["kubectl"]
+      args: ["apply","-f","$(KUBEFILES)"]
+      env:
+      - name: KUBEFILE
+        value: "{{inputs.parameters.kubefile}}"
+      volumeMounts:
+      - name: go-test-pvc
+        mountPath: /code
+  - name: istioctl
+    inputs:
+      parameters:
+      - name: istiofile
+    container:
+      image: cloudhero/istioctl:1.0.3
+      command: ["istioctl"]
+      args: ["create","-f","$(ISTIOFILE)"]
+      env:
+      - name: ISTIOFILE
+        value: "{{inputs.parameters.istiofile}}"
+      volumeMounts:
+      - name: go-test-pvc
+        mountPath: /code
+  - name: go-test-pipeline
+    steps:
+    - - name: cleanup
+        template: alpine-sh
+        arguments:
+          parameters: [{name: command, value:  rm -rf /code/lost+found}]
+    - - name: list
+        template: alpine-sh
+        arguments:
+          parameters: [{name: command, value: ls -la /code}]
+    - - name: pull-code
+        template: git
+        arguments:
+          parameters: [{name: targetDir, value: /}]
+    - - name: build
+        template: ci-dind
+        arguments:
+          parameters: [{name: http_proxy, value: http://qaterm.connex.ro},
+                        {name: https_proxy, value: http://qaterm.connex.ro},
+                        {name: no_proxy, value: localhost,127.0.0.1,devops02.connex.ro},
+                        {name: image, value: cloudhero/go-test}]
+    - - name: helm
+        template: helm-template
+        arguments:
+          parameters: [{name: additional-parameters, value: --set namespace=go-test --set containerPort=8080 --set suffix=},
+                        {name: image, value: cloudhero/go-test},
+                        {name: helm-folder, value: helm},
+                        {name: output, value: helm.yaml}]
+    - - name: helm-istio
+        template: helm-template
+        arguments:
+          parameters: [{name: additional-parameters, value: --set namespace=go-test --set suffix=},
+                        {name: image, value: ""},
+                        {name: helm-folder, value: helm-istio},
+                        {name: output, value: helm-istio.yaml}]
+    - - name: kubectl-deploy
+        template: kubectl
+        arguments:
+          parameters: [{name: kubefile, value: helm.yaml}]
+    - - name: istio-deploy
+        template: istio
+        arguments:
+          parameters: [{name: istiofile, value: helm-istio.yaml}]

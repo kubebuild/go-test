@@ -11,7 +11,7 @@ spec:
     - name: branch
       value: develop
     - name: repo
-      value: https://github.com/cloud-hero/go-test.git
+      value: git@github.com:cloud-hero/go-test.git
     - name: revision
       value: HEAD
   volumeClaimTemplates:
@@ -19,7 +19,6 @@ spec:
       name: go-test-pvc
     spec:
       accessModes: [ "ReadWriteOnce" ]
-      storageClassName: "connex-nfs"
       resources:
         requests:
           storage: 1Gi
@@ -170,9 +169,9 @@ spec:
     - - name: build
         template: ci-dind
         arguments:
-          parameters: [{name: http_proxy, value: http://qaterm.connex.ro},
-                        {name: https_proxy, value: http://qaterm.connex.ro},
-                        {name: no_proxy, value: localhost,127.0.0.1,devops02.connex.ro},
+          parameters: [{name: http_proxy, value: },
+                        {name: https_proxy, value: },
+                        {name: no_proxy, value: },
                         {name: image, value: cloudhero/go-test}]
     - - name: helm
         template: helm-template

@@ -20,63 +20,24 @@ spec:
   entrypoint: go-test-pipeline
   arguments:
     parameters:
-    - name: buildNumber
-      value: "0"
-    - name: branch
-      value: develop
-    - name: repo
-      value: git@github.com:cloud-hero/go-test.git
-    - name: revision
-      value: HEAD
     - name: dockerSecretName
       value: dockerhub
-  volumeClaimTemplates:
-  - metadata:
-      name: go-test-pvc
-    spec:
-      accessModes: [ "ReadWriteOnce" ]
-      resources:
-        requests:
-          storage: 1Gi
+    - name: helmOutputKubefile
+      value: helm.yaml
+    - name: helmOutputIstiofile
+      value: helm-istio.yaml
   templates:
-  - name: alpine-sh
-    inputs:
-      parameters:
-      - name: command
-    container:
-      image: alpine
-      command: ["sh","-c"]
-      args: ["{{inputs.parameters.command}}"]
-      volumeMounts:
-      - name: go-test-pvc
-        mountPath: /code
-  - name: git
-    inputs:
-      parameters:
-      - name: targetDir
-    container:
-      image: alpine/git
-      args: ["clone","--depth=1","-b","$(BRANCH)","-o","$(REVISION)","$(REPO)","/code$(TARGET_DIR)"]
-      volumeMounts:
-      - name: go-test-pvc
-        mountPath: /code
-      - mountPath: /root/.ssh/id_rsa
-        subPath: sshPrivateKey
-        name: git-secret
-
-      env:
-      - name: GIT_SSH_COMMAND
-        value: "ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
-      - name: BRANCH
-        value: "{{workflow.parameters.branch}}"
-      - name: REPO
-        value: "{{workflow.parameters.repo}}"
-      - name: REVISION
-        value: "{{workflow.parameters.revision}}"
-      - name: TARGET_DIR
-        value: "{{inputs.parameters.targetDir}}"
   - name: ci-dind
     inputs:
+      artifacts:
+      - name: go-test-source-code
+        path: /code
+        git:
+          repo: git@github.com:cloud-hero/go-test.git
+          revision: "{{workflow.parameters.revision}}"
+          sshPrivateKeySecret:
+            name: git-secret
+            key: sshPrivateKey
       parameters:
       - name: image
     container:
@@ -90,8 +51,6 @@ spec:
       docker push $(IMAGE):latest"]
       workingDir: /code
       volumeMounts:
-      - name: go-test-pvc
-        mountPath: /code
       - name: docker-volume
         mountPath: "/root/.docker"
         readOnly: true
@@ -114,8 +73,17 @@ spec:
       parameters:
       - name: additionalParameters
       - name: image
-      - name: outputName
       - name: helmFolder
+      - name: outputName
+      artifacts:
+      - name: go-test-source-code
+        path: /code
+        git:
+          repo: git@github.com:cloud-hero/go-test.git
+          revision: "{{workflow.parameters.revision}}"
+          sshPrivateKeySecret:
+            name: git-secret
+            key: sshPrivateKey
     container: 
       image: alpine/helm
       command: [sh, -c]
@@ -132,49 +100,38 @@ spec:
       - name: OUTPUT_NAME
         value: "{{inputs.parameters.outputName}}"
       workingDir: /code
-      volumeMounts:
-      - name: go-test-pvc
-        mountPath: /code
+    outputs:
+      artifacts:
+      - name: helmResult
+        path: "/code/{{inputs.parameters.outputName}}"
   - name: kubectl
     inputs:
-      parameters:
+      artifacts:
       - name: kubefile
+        path: "/code/{{workflow.parameters.helmOutputKubefile}}"
     container:
       image: cloudhero/kubectl:1.10.0
       command: ["kubectl"]
       args: ["apply","-f","$(KUBEFILE)"]
       env:
       - name: KUBEFILE
-        value: "{{inputs.parameters.kubefile}}"
+        value: "{{workflow.parameters.helmOutputKubefile}}"
       workingDir: /code
-      volumeMounts:
-      - name: go-test-pvc
-        mountPath: /code
   - name: istioctl
     inputs:
-      parameters:
+      artifacts:
       - name: istiofile
+        path: "/code/{{workflow.parameters.helmOutputIstiofile}}"
     container:
       image: cloudhero/istioctl:1.0.3
       command: [sh, -c]
       args: ["istioctl create -f $(ISTIOFILE) || istioctl replace -f $(ISTIOFILE)"]
       env:
       - name: ISTIOFILE
-        value: "{{inputs.parameters.istiofile}}"
+        value: "{{workflow.parameters.helmOutputIstiofile}}"
       workingDir: /code
-      volumeMounts:
-      - name: go-test-pvc
-        mountPath: /code
   - name: go-test-pipeline
     steps:
-    - - name: cleanup
-        template: alpine-sh
-        arguments:
-          parameters: [{name: command, value:  rm -rf /code/lost+found}]
-    - - name: pull-code
-        template: git
-        arguments:
-          parameters: [{name: targetDir, value: /}]
     - - name: build
         template: ci-dind
         arguments:
@@ -185,23 +142,23 @@ spec:
           parameters: [{name: additionalParameters, value: --set namespace=go-test --set containerPort=8080 --set suffix=},
                         {name: image, value: cloudhero/go-test},
                         {name: helmFolder, value: helm},
-                        {name: outputName, value: helm.yaml}]
-    - - name: helm-istio
+                        {name: outputName, value: "{{workflow.parameters.helmOutputKubefile}}"}]
+      - name: helm-istio
         template: helm-template
         arguments:
           parameters: [{name: additionalParameters, value: --set namespace=go-test --set suffix=},
                         {name: image, value: ""},
                         {name: helmFolder, value: helm-istio},
-                        {name: outputName, value: helm-istio.yaml}]
-    - - name: list
-        template: alpine-sh
-        arguments:
-          parameters: [{name: command, value:  ls -lah /code/}]
+                        {name: outputName, value: "{{workflow.parameters.helmOutputIstiofile}}"}]
     - - name: kubectl-deploy
         template: kubectl
         arguments:
-          parameters: [{name: kubefile, value: helm.yaml}]
-    - - name: istio-deploy
+          artifacts:
+          - name: kubefile
+            from: "{{steps.helm.outputs.artifacts.helmResult}}"
+      - name: istio-deploy
         template: istioctl
         arguments:
-          parameters: [{name: istiofile, value: helm-istio.yaml}]
+          artifacts:
+          - name: istiofile
+            from: "{{steps.helm-istio.outputs.artifacts.helmResult}}"

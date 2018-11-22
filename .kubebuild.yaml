@@ -64,7 +64,6 @@ spec:
     sidecars:
     - name: dind
       image: docker:stable-dind
-      args: ["--insecure-registry=devops02.connex.ro:18443"]
       securityContext:
         privileged: true
       mirrorVolumeMounts: true

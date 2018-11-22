@@ -136,7 +136,7 @@ spec:
         template: ci-dind
         arguments:
           parameters: [{name: image, value: cloudhero/go-test}]
-    - - name: helm
+    - - name: helm-kubectl
         template: helm-template
         arguments:
           parameters: [{name: additionalParameters, value: --set namespace=go-test --set containerPort=8080 --set suffix=},
@@ -155,7 +155,7 @@ spec:
         arguments:
           artifacts:
           - name: kubefile
-            from: "{{steps.helm.outputs.artifacts.helmResult}}"
+            from: "{{steps.helm-kubectl.outputs.artifacts.helmResult}}"
       - name: istio-deploy
         template: istioctl
         arguments:

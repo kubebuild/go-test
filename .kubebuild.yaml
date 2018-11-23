@@ -150,7 +150,7 @@ spec:
       parameters:
       - name: cmd
     container:
-      image: alpine/curl
+      image: appropriate/curl
       command: ["/bin/sh","-c"]
       args: ["{{inputs.parameters.cmd}}"]
       resources:

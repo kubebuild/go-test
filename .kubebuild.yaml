@@ -33,15 +33,6 @@ spec:
     - name: branch
       value: "feature/test"
   templates:
-  - name: isFeature
-    script:
-      image: debian:stretch
-      command: [bash]
-      env:
-      - name: BRANCH
-        value: "{{workflow.parameters.branch}}"
-      source: |
-        if [[ $BRANCH == feature/* ]] ; then echo yes ; else echo no ; fi
   - name: ci-dind
     inputs:
       artifacts:
@@ -225,8 +216,6 @@ spec:
         arguments:
           parameters: [{name: image, value: cloudhero/go-test},
                         {name: port, value: 8080}]
-    - - name: isFeature
-        template: isFeature
     - - name: deploy
         template: deploy
-        when: "{{steps.isFeature.outputs.result}} == no"
+        when: "{{workflow.parameters.branch}} !~ ^feature/.*$"

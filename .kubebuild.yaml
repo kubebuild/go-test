@@ -129,12 +129,65 @@ spec:
       - name: ISTIOFILE
         value: "{{workflow.parameters.helmOutputIstiofile}}"
       workingDir: /code
+  - name: go-test-server
+    inputs:
+      parameters:
+      - name: image
+      - name: port
+    daemon: true
+    container:
+      image: "{{inputs.parameters.image}}"
+      readinessProbe:
+        httpGet:
+          path: /
+          port: "{{inputs.parameters.port}}"
+          initialDelaySeconds: 5
+          timeoutSeconds: 1
+      ports:
+      - containerPort: "{{inputs.parameters.port}}"
+  - name: go-test-client
+    inputs:
+      parameters:
+      - name: cmd
+    container:
+      image: alpine/curl
+      command: ["/bin/sh","-c"]
+      args: ["{{inputs.parameters.cmd}}"]
+      resources:
+        requests:
+          memory: 32Mi
+          cpu: 100m
+  - name: e2e-test
+    inputs:
+      parameters:
+      - name: image
+      - name: port
+    steps:
+    - - name: go-test-server
+        template: go-test-server
+        arguments:
+          parameters:
+          - name: image
+            value: "{{inputs.parameters.image}}"
+          - name: port
+            value: "{{inputs.parameters.port}}"
+    - - name: go-test-client
+        template: go-test-client
+        arguments:
+          parameters:
+          - name: cmd
+            value: curl -XGET 'http://{{steps.go-test-server.ip}}:{{inputs.parameters.port}}'
   - name: go-test-pipeline
     steps:
     - - name: build
         template: ci-dind
         arguments:
           parameters: [{name: image, value: cloudhero/go-test}]
+    - - name: e2e-test
+        template: e2e-test
+        arguments:
+          parameters: [{name: image, value: cloudhero/go-test},
+                        {name: port, value: 8080}]
     - - name: helm-kubectl
         template: helm-template
         arguments:

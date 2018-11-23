@@ -27,6 +27,12 @@ spec:
     - name: helmOutputIstiofile
       value: helm-istio.yaml
   templates:
+  - name: isFeature
+    script:
+      image: alpine
+      command: [sh]
+      source: |
+        if [[ "{{workflow.parameters.branch}}" == feature/* ]] ; then echo yes ; else echo no ; fi
   - name: ci-dind
     inputs:
       artifacts:
@@ -137,12 +143,6 @@ spec:
     daemon: true
     container:
       image: "{{inputs.parameters.image}}"
-      # readinessProbe:
-      #   httpGet:
-      #     path: /
-      #     port: 8080
-      #   initialDelaySeconds: 5
-      #   timeoutSeconds: 1
       ports:
       - containerPort: 8080
   - name: go-test-client
@@ -216,5 +216,8 @@ spec:
         arguments:
           parameters: [{name: image, value: cloudhero/go-test},
                         {name: port, value: 8080}]
+    - - name: isFeature
+        template: isFeature
     - - name: deploy
         template: deploy
+        when: "{{steps.isFeature.outputs.result}} == no"

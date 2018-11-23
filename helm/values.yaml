@@ -2,3 +2,4 @@ namespace: go-test
 suffix: 
 image: cloudhero/go-test:latest
 containerPort: 8080
+replicas: 2

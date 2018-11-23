@@ -3,71 +3,48 @@ kind: Workflow
 metadata:
   generateName: go-test-pipeline-
 spec:
+  imagePullSecrets:
+  - name: dockerhub
+  volumes:
+  - name: git-secret
+    secret:
+      secretName: git-secret
+      defaultMode: 256
+  - name: docker-volume
+    secret:
+      secretName: "{{workflow.parameters.dockerSecretName}}"
+      defaultMode: 0600
+      items:
+      - key: .dockerconfigjson
+        path: config.json
   entrypoint: go-test-pipeline
   arguments:
     parameters:
-    - name: buildNumber
-      value: "0"
-    - name: branch
-      value: develop
-    - name: repo
-      value: https://github.com/cloud-hero/go-test.git
-    - name: revision
-      value: HEAD
-  volumeClaimTemplates:
-  - metadata:
-      name: go-test-pvc
-    spec:
-      accessModes: [ "ReadWriteOnce" ]
-      storageClassName: "connex-nfs"
-      resources:
-        requests:
-          storage: 1Gi
+    - name: dockerSecretName
+      value: dockerhub
+    - name: helmOutputKubefile
+      value: helm.yaml
+    - name: helmOutputIstiofile
+      value: helm-istio.yaml
   templates:
-  - name: alpine-sh
-    inputs:
-      parameters:
-      - name: command
-    container:
-      image: alpine
-      command: ["sh","-c"]
-      args: ["{{inputs.parameters.command}}"]
-      volumeMounts:
-      - name: go-test-pvc
-        mountPath: /code
-  - name: git
-    inputs:
-      parameters:
-      - name: branch
-      - name: repo
-      - name: targetDir
-      - name: port
-    container:
-      image: alpine/git
-      args: ["clone","--depth=1","-b","$(BRANCH)","$(REVISION)","$(REPO)","/code$(TARGET_DIR)"]
-      volumeMounts:
-      - name: go-test-pvc
-        mountPath: /code
-      env:
-      - name: GIT_SSH_COMMAND
-        value: "ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -p {{inputs.parameters.port}}"
-      - name: BRANCH
-        value: "{{workflow.parameters.branch}}"
-      - name: REPO
-        value: "{{workflow.parameters.repo}}"
-      - name: REVISION
-        value: "{{workflow.parameters.revision}}"
-      - name: TARGET_DIR
-        value: "{{inputs.parameters.targetDir}}"
   - name: ci-dind
+    inputs:
+      artifacts:
+      - name: go-test-source-code
+        path: /code
+        git:
+          repo: git@github.com:cloud-hero/go-test.git
+          revision: "{{workflow.parameters.revision}}"
+          sshPrivateKeySecret:
+            name: git-secret
+            key: sshPrivateKey
+      parameters:
+      - name: image
     container:
       image: docker:stable
       command: [sh, -c]
       args: ["until docker ps; do sleep 3; done && 
       docker build 
-      --build-arg http_proxy=$(HTTP_PROXY)
-      --build-arg https_proxy=$(HTTPS_PROXY) 
-      --build-arg no_proxy=$(NO_PROXY)
       -t $(IMAGE):$(TAG) . && 
       docker push $(IMAGE):$(TAG) && 
       docker tag $(IMAGE):$(TAG) $(IMAGE):latest && 
@@ -77,17 +54,9 @@ spec:
       - name: docker-volume
         mountPath: "/root/.docker"
         readOnly: true
-      - name: go-test-pvc
-        mountPath: /code
       env:
       - name: DOCKER_HOST
         value: 127.0.0.1
-      - name: HTTP_PROXY
-        value: "{{inputs.parameters.http_proxy}}"
-      - name: HTTPS_PROXY
-        value: "{{inputs.parameters.https_proxy}}"
-      - name: NO_PROXY
-        value: "{{inputs.parameters.no_proxy}}"
       - name: IMAGE
         value: "{{inputs.parameters.image}}"
       - name: TAG
@@ -95,104 +64,153 @@ spec:
     sidecars:
     - name: dind
       image: docker:stable-dind
-      args: ["--insecure-registry=devops02.connex.ro:18443"]
-      env:
-      - name: HTTP_PROXY
-        value: {{inputs.parameters.http-proxy}}
-      - name: HTTPS_PROXY
-        value: {{inputs.parameters.http-proxy}}
-      - name: NO_PROXY
-        value: {{inputs.parameters.no_proxy}}
       securityContext:
         privileged: true
       mirrorVolumeMounts: true
   - name: helm-template
-    container: 
-      image: alpine/helm
-      command: ["helm"]
-      args: ["temlate","--set image=$(IMAGE):$(TAG)","$(ADDITIONAL_PARAMETERS)","$(HELM_FOLDER)",">","$(OUTPUT_NAME)"]
-      env:
-      - name: ADDITIONAL_PARAMETERS
-        value: {{inputs.parameters.additional-parameters}}
-      - name: IMAGE
-        value: {{inputs.parameters.image}}
-      - name: TAG
-        value: {{workflow.parameters.buildNumber}}
-      - name: HELM_FOLDER
-        value: {{inputs.parameters.helm-folder}}
-      - name: OUTPUT_NAME
-        value: {{inputs.parameters.output-name}}
-      volumeMounts:
-      - name: go-test-pvc
-        mountPath: /code
-  - name: kubectl
     inputs:
       parameters:
+      - name: additionalParameters
+      - name: image
+      - name: helmFolder
+      - name: outputName
+      artifacts:
+      - name: go-test-source-code
+        path: /code
+        git:
+          repo: git@github.com:cloud-hero/go-test.git
+          revision: "{{workflow.parameters.revision}}"
+          sshPrivateKeySecret:
+            name: git-secret
+            key: sshPrivateKey
+    container: 
+      image: alpine/helm
+      command: [sh, -c]
+      args: ["helm template --set image=$(IMAGE):$(TAG) $(ADDITIONAL_PARAMETERS) $(HELM_FOLDER) > $(OUTPUT_NAME)"]
+      env:
+      - name: ADDITIONAL_PARAMETERS
+        value: "{{inputs.parameters.additionalParameters}}"
+      - name: IMAGE
+        value: "{{inputs.parameters.image}}"
+      - name: TAG
+        value: "{{workflow.parameters.buildNumber}}"
+      - name: HELM_FOLDER
+        value: "{{inputs.parameters.helmFolder}}"
+      - name: OUTPUT_NAME
+        value: "{{inputs.parameters.outputName}}"
+      workingDir: /code
+    outputs:
+      artifacts:
+      - name: helmResult
+        path: "/code/{{inputs.parameters.outputName}}"
+  - name: kubectl
+    inputs:
+      artifacts:
       - name: kubefile
+        path: "/code/{{workflow.parameters.helmOutputKubefile}}"
     container:
       image: cloudhero/kubectl:1.10.0
       command: ["kubectl"]
-      args: ["apply","-f","$(KUBEFILES)"]
+      args: ["apply","-f","$(KUBEFILE)"]
       env:
       - name: KUBEFILE
-        value: "{{inputs.parameters.kubefile}}"
-      volumeMounts:
-      - name: go-test-pvc
-        mountPath: /code
+        value: "{{workflow.parameters.helmOutputKubefile}}"
+      workingDir: /code
   - name: istioctl
     inputs:
-      parameters:
+      artifacts:
       - name: istiofile
+        path: "/code/{{workflow.parameters.helmOutputIstiofile}}"
     container:
       image: cloudhero/istioctl:1.0.3
-      command: ["istioctl"]
-      args: ["create","-f","$(ISTIOFILE)"]
+      command: [sh, -c]
+      args: ["istioctl create -f $(ISTIOFILE) || istioctl replace -f $(ISTIOFILE)"]
       env:
       - name: ISTIOFILE
-        value: "{{inputs.parameters.istiofile}}"
-      volumeMounts:
-      - name: go-test-pvc
-        mountPath: /code
+        value: "{{workflow.parameters.helmOutputIstiofile}}"
+      workingDir: /code
+  - name: go-test-server
+    inputs:
+      parameters:
+      - name: image
+      - name: port
+    daemon: true
+    container:
+      image: "{{inputs.parameters.image}}"
+      readinessProbe:
+        httpGet:
+          path: /
+          port: "{{inputs.parameters.port}}"
+          initialDelaySeconds: 5
+          timeoutSeconds: 1
+      ports:
+      - containerPort: "{{inputs.parameters.port}}"
+  - name: go-test-client
+    inputs:
+      parameters:
+      - name: cmd
+    container:
+      image: alpine/curl
+      command: ["/bin/sh","-c"]
+      args: ["{{inputs.parameters.cmd}}"]
+      resources:
+        requests:
+          memory: 32Mi
+          cpu: 100m
+  - name: e2e-test
+    inputs:
+      parameters:
+      - name: image
+      - name: port
+    steps:
+    - - name: go-test-server
+        template: go-test-server
+        arguments:
+          parameters:
+          - name: image
+            value: "{{inputs.parameters.image}}"
+          - name: port
+            value: "{{inputs.parameters.port}}"
+    - - name: go-test-client
+        template: go-test-client
+        arguments:
+          parameters:
+          - name: cmd
+            value: curl -XGET 'http://{{steps.go-test-server.ip}}:{{inputs.parameters.port}}'
   - name: go-test-pipeline
     steps:
-    - - name: cleanup
-        template: alpine-sh
-        arguments:
-          parameters: [{name: command, value:  rm -rf /code/lost+found}]
-    - - name: list
-        template: alpine-sh
-        arguments:
-          parameters: [{name: command, value: ls -la /code}]
-    - - name: pull-code
-        template: git
-        arguments:
-          parameters: [{name: targetDir, value: /}]
     - - name: build
         template: ci-dind
         arguments:
-          parameters: [{name: http_proxy, value: http://qaterm.connex.ro},
-                        {name: https_proxy, value: http://qaterm.connex.ro},
-                        {name: no_proxy, value: localhost,127.0.0.1,devops02.connex.ro},
-                        {name: image, value: cloudhero/go-test}]
-    - - name: helm
+          parameters: [{name: image, value: cloudhero/go-test}]
+    - - name: e2e-test
+        template: e2e-test
+        arguments:
+          parameters: [{name: image, value: cloudhero/go-test},
+                        {name: port, value: 8080}]
+    - - name: helm-kubectl
         template: helm-template
         arguments:
-          parameters: [{name: additional-parameters, value: --set namespace=go-test --set containerPort=8080 --set suffix=},
+          parameters: [{name: additionalParameters, value: --set namespace=go-test --set containerPort=8080 --set suffix=},
                         {name: image, value: cloudhero/go-test},
-                        {name: helm-folder, value: helm},
-                        {name: output, value: helm.yaml}]
-    - - name: helm-istio
+                        {name: helmFolder, value: helm},
+                        {name: outputName, value: "{{workflow.parameters.helmOutputKubefile}}"}]
+      - name: helm-istio
         template: helm-template
         arguments:
-          parameters: [{name: additional-parameters, value: --set namespace=go-test --set suffix=},
+          parameters: [{name: additionalParameters, value: --set namespace=go-test --set suffix=},
                         {name: image, value: ""},
-                        {name: helm-folder, value: helm-istio},
-                        {name: output, value: helm-istio.yaml}]
+                        {name: helmFolder, value: helm-istio},
+                        {name: outputName, value: "{{workflow.parameters.helmOutputIstiofile}}"}]
     - - name: kubectl-deploy
         template: kubectl
         arguments:
-          parameters: [{name: kubefile, value: helm.yaml}]
-    - - name: istio-deploy
-        template: istio
+          artifacts:
+          - name: kubefile
+            from: "{{steps.helm-kubectl.outputs.artifacts.helmResult}}"
+      - name: istio-deploy
+        template: istioctl
         arguments:
-          parameters: [{name: istiofile, value: helm-istio.yaml}]
+          artifacts:
+          - name: istiofile
+            from: "{{steps.helm-istio.outputs.artifacts.helmResult}}"

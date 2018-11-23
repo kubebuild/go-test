@@ -6,7 +6,7 @@ metadata:
   labels:
     component: go-test{{ .Values.suffix }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.replicas}}
   revisionHistoryLimit: 2
   selector:
     matchLabels:

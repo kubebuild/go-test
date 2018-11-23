@@ -140,11 +140,11 @@ spec:
       readinessProbe:
         httpGet:
           path: /
-          port: "{{inputs.parameters.port}}"
-          initialDelaySeconds: 5
-          timeoutSeconds: 1
+          port: 8080
+        initialDelaySeconds: 5
+        timeoutSeconds: 1
       ports:
-      - containerPort: "{{inputs.parameters.port}}"
+      - containerPort: 8080
   - name: go-test-client
     inputs:
       parameters:

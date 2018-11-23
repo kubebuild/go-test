@@ -137,12 +137,6 @@ spec:
     daemon: true
     container:
       image: "{{inputs.parameters.image}}"
-      # readinessProbe:
-      #   httpGet:
-      #     path: /
-      #     port: 8080
-      #   initialDelaySeconds: 5
-      #   timeoutSeconds: 1
       ports:
       - containerPort: 8080
   - name: go-test-client
@@ -177,17 +171,8 @@ spec:
           parameters:
           - name: cmd
             value: curl -XGET 'http://{{steps.go-test-server.ip}}:{{inputs.parameters.port}}'
-  - name: go-test-pipeline
+  - name: deploy
     steps:
-    - - name: build
-        template: ci-dind
-        arguments:
-          parameters: [{name: image, value: cloudhero/go-test}]
-    - - name: e2e-test
-        template: e2e-test
-        arguments:
-          parameters: [{name: image, value: cloudhero/go-test},
-                        {name: port, value: 8080}]
     - - name: helm-kubectl
         template: helm-template
         arguments:
@@ -214,3 +199,17 @@ spec:
           artifacts:
           - name: istiofile
             from: "{{steps.helm-istio.outputs.artifacts.helmResult}}"
+  - name: go-test-pipeline
+    steps:
+    - - name: build
+        template: ci-dind
+        arguments:
+          parameters: [{name: image, value: cloudhero/go-test}]
+    - - name: e2e-test
+        template: e2e-test
+        arguments:
+          parameters: [{name: image, value: cloudhero/go-test},
+                        {name: port, value: 8080}]
+    - - name: deploy
+        template: deploy
+        when: "{{workflow.parameters.branch}} !~ ^feature/.*$"

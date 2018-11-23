@@ -26,13 +26,22 @@ spec:
       value: helm.yaml
     - name: helmOutputIstiofile
       value: helm-istio.yaml
+    - name: revision
+      value: "feature/test"
+    - name: buildNumber
+      value: "0"
+    - name: branch
+      value: "feature/test"
   templates:
   - name: isFeature
     script:
-      image: alpine
-      command: [sh]
+      image: debian:stretch
+      command: [bash]
+      env:
+      - name: BRANCH
+        value: "{{workflow.parameters.branch}}"
       source: |
-        if [[ {{workflow.parameters.branch}} == feature/* ]] ; then echo yes ; else echo no ; fi
+        if [[ $BRANCH == feature/* ]] ; then echo yes ; else echo no ; fi
   - name: ci-dind
     inputs:
       artifacts:

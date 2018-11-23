@@ -32,7 +32,7 @@ spec:
       image: alpine
       command: [sh]
       source: |
-        if [[ "{{workflow.parameters.branch}}" == feature/* ]] ; then echo yes ; else echo no ; fi
+        if [[ {{workflow.parameters.branch}} == feature/* ]] ; then echo yes ; else echo no ; fi
   - name: ci-dind
     inputs:
       artifacts:

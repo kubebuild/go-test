@@ -137,20 +137,20 @@ spec:
     daemon: true
     container:
       image: "{{inputs.parameters.image}}"
-      readinessProbe:
-        httpGet:
-          path: /
-          port: "{{inputs.parameters.port}}"
-          initialDelaySeconds: 5
-          timeoutSeconds: 1
+      # readinessProbe:
+      #   httpGet:
+      #     path: /
+      #     port: 8080
+      #   initialDelaySeconds: 5
+      #   timeoutSeconds: 1
       ports:
-      - containerPort: "{{inputs.parameters.port}}"
+      - containerPort: 8080
   - name: go-test-client
     inputs:
       parameters:
       - name: cmd
     container:
-      image: alpine/curl
+      image: appropriate/curl
       command: ["/bin/sh","-c"]
       args: ["{{inputs.parameters.cmd}}"]
       resources:
